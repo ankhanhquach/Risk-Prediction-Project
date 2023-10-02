@@ -1,0 +1,862 @@
+---
+title: "Financial model credit risk"
+author: "Khanh Quach"
+date: 
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+```{r echo = FALSE}
+# Clear environment of variables and functions
+rm(list = ls(all = TRUE)) 
+
+# Clear environmet of packages
+if(is.null(sessionInfo()$otherPkgs) == FALSE)lapply(paste("package:", names(sessionInfo()$otherPkgs), sep=""), detach, character.only = TRUE, unload = TRUE)
+
+```
+
+# Project Goal (Problem + Objective)
+
+Sample - Through this investigation, we hope to identify points of weakness and find out how to best reallocate OfficeMax's resources to help it back into the black. We expect profit to vary by location, as urban areas may have more working professionals in companies and/or home offices that need supplies, while rural areas have less of that demographic. We are interested in finding which products are more impactful to the consumer and if we can draw attention to it for further investigation.)
+
+
+```{r include = FALSE}
+# The tidyverse package contains ggplot2, dplyr, and several other packages we will use
+library(tidyverse)
+
+# The gridExtra package contains the grid.arrange function used to combine plots in the same window
+library(gridExtra)
+
+# The janitor package contains tidyverse functions for cross-tables
+library(janitor)
+
+# The knitr package contains some table formating functions
+library(knitr)
+
+# The GGally package contains a custom correlation plot we will use
+library(GGally)
+
+# The corrplot package is used to make color coded correlation charts
+library(corrplot)
+
+# To manipulate dates
+library(lubridate)
+library(dplyr)
+library(scales)
+
+# For kNN Model
+library(caret)
+library(FNN)
+library(class)
+
+# For Decision Tree 
+library(rpart)
+library(rpart.plot)
+library(forecast)
+
+# For balancing data for modeling and diagnostic
+library(ROSE)
+#library(remotes)
+#install_version("ggfittext", "0.9.0")
+#library(ggfittext)
+#install.packages("modelplotr")
+library(fixest)
+#R.version.string
+```
+
+# About Data
+
+Sample - Describe the purpose of the data from the topic you selected (i.e., why was this data collected in the first place?). # Load and transform data
+
+```{r}
+# Load data
+loan <- read.csv("loan_12.csv")
+```
+
+```{r}
+# View the Data
+head(loan)
+```
+
+Most of the data is cleaned. Each column is of the same variable type and each row is a unique observation. However, we need to rename the variables and remone column 1.
+
+```{r}
+# We need to also remove the 1st column since they are just an indication of the number of rows
+loan <- loan[ , -c(1)]
+
+# As from data heading, we need to rename the variables
+loan <- loan %>%
+  select(c(1:27)) %>%
+  rename("credit_score" = 1,
+         "1st pay day" = 2,
+         "homebuyer flag" = 3,
+         "maturity date" = 4,
+         "MSA code" = 5,
+         "MI" = 6,
+         "# of units" = 7,
+         "occpy status" = 8,
+         "CLTV" = 9,
+         "DTI" = 10,
+         "UPB" = 11,
+         "LTV" = 12,
+         "interest" = 13,
+         "channel" = 14,
+         "ppm flag" = 15,
+         "product type" = 16,
+         "prop_state" = 17,
+         "prop_type" = 18,
+         "zip code" = 19,
+         "loan no." = 20,
+         "loan purpose" = 21,
+         "loan term" = 22,
+         "# of borrowers" = 23,
+         "seller name" = 24,
+         "servicer name" = 25,
+         "conform flag" = 26,
+         "risk_level" = 27)
+
+```
+
+## Descriptive Data
+
+```{r}
+# Examining the data with head(), str(), and summary()
+
+#View the Data
+head(loan)
+
+# Check the structure of the data
+str(loan)
+
+# Check desctiptive stats of the data
+summary(loan)
+```
+
++ 12 categorical variables
++ 15 continuous variables
++ 1 Indicator Variables (loan no.; has categorical structure)
++ 2 Date variables
+
++ There are several variables that could be convert into factor variables so that it will be easier for us the analyze the data and we can extract more information from them. (i.e Risk level, # of borrowers, and # of units variable)
+    
++ In our EDA, we will omit the indicator variables (like loan no. since they just serve to track each observation
+
+    - However, we will not be removing them entirely from the database since we could still use loan no. variables to analyze other variables by using the "group by" function
+
++ State and Zip Code all give information about the location of the order in varying degrees of specificity. To focus this model, we will only look at State and will omit Zip Code.
+    
+    - Important to note that although Zip Codes are integers, they are continuous since the numbers cannot be measured 
+    
++ Seller name and Servicer name variable has more than 20 factor levels, which may be hard to show in visualizations 
+
+```{r}
+# Convert target variable into factor variables
+loan$risk_level <- as.factor(loan$risk_level)
+
+# Verify the change
+str(loan$risk_level)
+```
+
+```{r}
+# Assign loan data into a new data frame and remove unnessecary variables
+new_loan <- loan[, -c(2:5, 7, 8, 11, 15, 16, 19:26)]
+
+names(new_loan)
+```
+
+```{r}
+# Again, Examining the data with head(), str(), and summary()
+
+#View the Data
+head(new_loan)
+
+# Check the structure of the data
+str(new_loan)
+```
+
++ There are now 10 variables in total
+
+  1. Credit Score: Summarizing the borrower's creditworthiness
+  2. Morgage Interest Percentage (MI %): The percentage of loss coverage on loans
+  3. Original Combined Loan-To-Value (CLTV): This takes into consideration all loans on the property. Like first moragage, second mortgages, home equity loans or lines of credit. First mortgage + second mortgage + n = Total mortgages. Total mortgages/Value of the property = CLTV
+  4. Original Debt-To-Income Ratio (DTI Ratio): The percentage of a consumer's monthly gross income that goes toward paying debts.
+  5. Original Loan-To_value Ratio (LTV Ratio): The percentage of money borrowed compared to the value of the home. Loan amount/Purchase price = Loan to Value Ratio.
+  6. Original Interest Rate (interest %): The original note rate as indicated on mortgage note.
+  7. Channel: Indicate which entity originated or was involved in the origination of the mortgage loan.
+  8. Property State: The state or territory within which the property securing the mortage is located.
+  9. Propety Type: Denotes the property type secured by the mortgage
+  10. Risk Level: 2 values target factor variable
+
+
+```{r}
+# Check desctiptive stats of the data
+summary(new_loan)
+```
+
+**Comments**
+
+    - We can see that the first 5 variables MAX values are 999 or 9999 which represents information that are not available.
+    - We need to rename the column values to NA (Not Available) so that we can omit these NA rows
+    
+```{r}
+# Setting the NA value as NULL
+new_loan$credit_score[new_loan$credit_score == "9999"] <- NA
+new_loan$MI[new_loan$MI == "999"] <- NA
+new_loan$CLTV[new_loan$`CLTV` == "999"] <- NA
+new_loan$DTI[new_loan$DTI == "999"] <- NA
+new_loan$LTV[new_loan$LTV == "999"] <- NA
+
+# Again, Check desctiptive stats of the data
+summary(new_loan)
+nrow(new_loan)
+```
+
+**Comments**
+
+    - Note that we are only considering removing the NA row because when we run the summary data, there are very few NA rows compare to out actual observation numbers (which is 623322), so omitting them will not drastically effect our analysis
+    
+```{r}
+# Omitting NA values; 34 rows in total
+new_loan <- na.omit(new_loan) 
+
+# Again, Check desctiptive stats of the data
+summary(new_loan)
+nrow(new_loan)
+```
+
+**Comments**
+
+    - Now, we are left with 623250 observation number 
+    - From observing the MAX value, it does not seem like there is an outlier
+    - Data are not highly skewed since there are not a significant difference between the medians and the means
+    - All variables seems to be normally distributed
+    - write more
+
+# Data Visualization
+
+```{r message = FALSE}
+# Remove Scientific Notation for Price
+options(scipen = 999)
+
+# Here we will show all categorical variables together
+grid.arrange( 
+  
+# Channel
+ggplot(data = new_loan, mapping = aes(x = channel)) + 
+    geom_bar(mapping = aes(fill = channel)) + 
+    theme(legend.position = "none") +
+    labs(x = "Channel", y = ""),
+
+# Property Type
+ggplot(data = new_loan, mapping = aes(x = new_loan$prop_type)) + 
+    geom_bar(mapping = aes(fill = new_loan$prop_type)) +
+    labs(x = "Property Type") +
+    theme(legend.position = "none") +
+    labs(x = "Property Type", y = ""),
+    
+
+# Risk Level
+ggplot(data = new_loan, mapping = aes(x = new_loan$risk_level)) + 
+    geom_bar(mapping = aes(fill = new_loan$risk_level)) +
+    labs(x = "Risk Level") +
+    theme(legend.position = "none") +
+    labs(x = "Property Type", y = ""),
+
+ncol = 2, top = "Title")
+```
+
+```{r message = FALSE, fig.height = 4}
+
+# Continuous Histrogram
+grid.arrange(
+  new_loan %>% 
+    ggplot(aes(credit_score)) +
+      geom_histogram()+
+      labs(x = "Credit Score", y = ""),
+  new_loan %>% 
+    ggplot(aes(MI)) +
+      geom_histogram() +
+      labs(x = "Mortgage Insurance %", y = ""), #binwidth = 60
+  new_loan %>% 
+    ggplot(aes(CLTV)) +
+      geom_histogram() +
+      labs(x = "CLTV", y = ""), #binwidth = .05
+  new_loan %>% 
+    ggplot(aes(DTI)) +
+      geom_histogram() +
+      labs(x = "DTI", y = ""), #binwidth = .5
+  new_loan %>% 
+    ggplot(aes(LTV)) +
+      geom_histogram() +
+      labs(x = "LTV", y = ""),
+  new_loan %>% 
+    ggplot(aes(interest)) +
+      geom_histogram() +
+      labs(x = "Interest %", y = ""),
+
+ncol = 2, top = "title")
+
+```
+
+```{r fig.height = 7}
+# Property State (in its own chunk for easier viewing)
+ggplot(data = new_loan, mapping = aes(x = new_loan$prop_state)) + 
+    geom_bar(mapping = aes(fill = new_loan$prop_state)) +
+    labs(x = "Property State") +
+    theme(legend.position = "none") +
+    coord_cartesian(ylim = c(0, 45000)) + coord_flip() +
+    ggtitle("Property Location (State)") + 
+    labs(x = "State", y = "") 
+    
+```
+
+```{r}
+ggplot(data = new_loan, mapping = aes(x = credit_score, fill = risk_level)) + 
+    geom_histogram() +  ggtitle("Risk Level According to Credit Scores") +
+    labs(x = "Credit Score", y = "") + 
+    scale_fill_discrete(name = "Risk Level", labels = c("0 - Median to Low Risk","1 - High Risk")) +
+  theme_classic()
+  
+```
+
+
+```{r}
+new_loan %>%
+  group_by(risk_level) %>%
+  summarize(median_score = median(credit_score)) %>%
+  ggplot (mapping = aes(x = risk_level, y = median_score, fill= risk_level)) + 
+    geom_bar(stat= "identity") +
+    geom_text(aes(label=median_score), position=position_dodge(width=0.9), vjust=-0.25) +
+    coord_cartesian(ylim = c(400, 800)) +
+    ggtitle("Title", 
+    sub = "Subtitle") +
+    labs(x = "Risk Level", y = "Median Credit Score") + 
+    scale_fill_discrete(name = "Risk Level", labels = c("0 - Median to Low Risk","1 - High Risk")) 
+    
+```
+**Comment**
+
+    - According to 623250 observations:
+      - We pick median as the credit score column deemed to be skewed.
+      - The median score for being labeled as low risk is 761. 
+      - The median score for being labeled as high risk is 745.
+      - Customers with equal or higher than 761 in creditscore tend to be considered as low risk. 
+      - Customers with equal or lower than 745 in creditscore tend to be considered as high risk. 
+```{r}
+# Correlation table
+corr_loan <- new_loan %>% 
+  select_if(is.numeric) %>% # Use to select just the numeric variables
+  cor() %>% 
+  round(2)
+
+corrplot(corr_loan, method = "color", title = "Correlation Table")   
+
+```
+
+# Recode factor predictors 
+
+```{r}
+# recode factor predictor variables into numerical but keep as factor before starting to set seed and train data for modeling
+
+# extract unique levels for channel
+channel_type <- unique(new_loan$channel)
+channel_type
+
+# extract unique levels for prop. type
+prop_type <- unique(new_loan$prop_type)
+prop_type
+```
+
+```{r}
+# recode channel using numerical values
+new_loan$channel <- factor(new_loan$channel,
+                                levels = channel_type,
+                                labels = c(1:3))
+
+# rename prop. type using numerical values
+new_loan$prop_type <- factor(new_loan$prop_type,
+                         levels = prop_type,
+                         labels = c(1:5))
+
+table(new_loan$channel)
+table(new_loan$prop_type)
+```
+
+# Training-Validation split
+
+```{r}
+# kNN data set remove state
+knn_loan <- new_loan[, -c(8)]
+
+knn_loan <- sample_frac(knn_loan, 0.1)
+
+```
+
+```{r}
+# First, set the seed.
+set.seed(666)
+```
+
+```{r}
+# Then randomly sample the rows via their indices (i.e. row numbers).
+# We will do a 60-40 split.
+
+train_index <- sample(1:nrow(knn_loan), 0.6 * nrow(knn_loan))
+valid_index <- setdiff(1:nrow(knn_loan), train_index)
+```
+
+Assign the randomly selected indices to the dataset to create the training and validation sets.
+
+```{r}
+train_df <- knn_loan[train_index, ]
+valid_df <- knn_loan[valid_index, ]
+```
+
+It’s a good idea to check the 2 sets before continuing.
+
+```{r}
+nrow(train_df)
+nrow(valid_df)
+```
+
+```{r}
+head(train_df)
+str(train_df)
+```
+
+```{r}
+head(valid_df)
+str(valid_df)
+```
+
+# Normalisation
+
+This is needed if predictors are on a different scale and only for numerical variable
+
+```{r}
+train_norm <- train_df
+valid_norm <- valid_df
+
+# Let's review our variables (we can see 10 variables, but we will not be normalizing 'Risk Level' variable because it is our target variable)
+
+# First, review the variables again and their strings
+names(train_norm)
+str(train_norm)
+```
+
+```{r}
+norm_values <- preProcess(train_df[, -c(7:9)],
+                          method = c("center",
+                                     "scale"))
+train_norm[, -c(7:9)] <- predict(norm_values,
+                                train_df[, -c(7:9)])
+
+valid_norm[, -c(7:9)] <- predict(norm_values,
+                                valid_df[, -c(7:9)])
+
+head(train_norm)
+head(valid_norm)
+
+str(train_norm)
+str(valid_norm)
+
+compare_df_cols(train_norm, valid_norm)
+```
+
+# Optimal k for kNN
+
+This step is not necessary if you already have a value for k in mind.
+
+If so, skip to the next section.
+
+Otherwise, this will help find the optimum k.
+
+First, create a df for accuracy using values from 1 to 19, 1 step at a time.
+
+```{r}
+accuracy_df <- data.frame(k = seq(1, 19, 1), accuracy = rep(1, 19))
+
+accuracy_df
+```
+
+Obtain the accuracies using k = i, then generate the output as df.
+
+For a large dataset, this can take a while.
+
+We can choose k = 8, but to prevent a random tie breaker.
+
+This is characteristic of kNN, it’s better to use an odd number k.
+
+```{r}
+for(i in 1:19) {
+  knn_pred <- class::knn(train_norm[, -c(9)], 
+                         valid_norm[, -c(9)], 
+                         cl = train_norm$risk_level, k = i)
+  accuracy_df[i, 2] <- confusionMatrix(knn_pred,
+                                       factor(valid_norm[, 9]))$overall[1]
+}
+
+accuracy_df
+```
+
+# kNN for k = 7
+
+```{r}
+knn_pred_k7 <- class::knn(train = train_norm[,-c(9)], 
+                          test = valid_norm[, -c(9)], 
+                          cl = train_norm$risk_level, 
+                          k = 7)
+
+#Confusion matrix for the model.
+confusionMatrix(knn_pred_k7, as.factor(valid_df[, 9]), positive = "1")
+```
+
+```{r}
+roc.curve(valid_norm_rose$risk_level, knn_pred_k7)
+```
+
+
+# Model Diagnostic 
+
+## Weighted Training Data
+
+```{r}
+names(train_df)
+```
+
+
+```{r}
+# Using ROSE package we will create weighted training df
+
+train_df_rose <- ROSE(risk_level ~ credit_score + MI + 
+                        CLTV + DTI + LTV + 
+                        interest + channel + prop_type,
+                      data = train_df, seed = 666)$data
+
+table(train_df_rose$risk_level)
+```
+
+# Normalising w/ balances train df
+
+```{r}
+train_norm_rose <- train_df
+valid_norm_rose <- valid_df
+
+# Let's review our variables (we can see 10 variables, but we will not be normalizing 'Risk Level' variable because it is our target variable)
+
+# First, review the variables again and their strings
+names(train_norm_rose)
+str(train_norm_rose)
+
+```
+
+
+```{r}
+norm_values_rose <- preProcess(train_df_rose[, -c(7:9)],
+                          method = c("center",
+                                     "scale"))
+train_norm_rose[, -c(7:9)] <- predict(norm_values_rose,
+                                train_df_rose[, -c(7:9)])
+
+valid_norm_rose[, -c(7:9)] <- predict(norm_values_rose,
+                                valid_df[, -c(7:9)])
+
+head(train_norm_rose)
+head(valid_norm_rose)
+
+str(train_norm_rose)
+str(valid_norm_rose)
+
+compare_df_cols(train_norm_rose, valid_norm_rose)
+```
+
+
+```{r}
+for(i in 1:19) {
+  knn_pred <- class::knn(train_norm_rose[, -c(9)], 
+                         valid_norm_rose[, -c(9)], 
+                         cl = train_norm_rose$risk_level, k = i)
+  accuracy_df[i, 2] <- confusionMatrix(knn_pred,
+                                       factor(valid_norm_rose[, 9]))$overall[1]
+}
+
+accuracy_df
+```
+
+```{r}
+# kNN for k = 7
+
+knn_pred_k7_rose <- class::knn(train = train_norm_rose[,-c(9)], 
+                          test = valid_norm_rose[, -c(9)], 
+                          cl = train_norm_rose$risk_level, 
+                          k = 7)
+
+#Confusion matrix for the model.
+confusionMatrix(knn_pred_k7_rose, as.factor(valid_norm_rose[, 9]), positive = "1")
+
+# Sensitivity number = recall or the true positive rate
+# Specificity number = accuracy in predicting not the given class
+# i.e this model might to be great to predict Class: Ravenclaw (Look at sensiticity for Ravenclaw)
+#     but this model is great to predict Class NOT Revenclaw (LOOk at specificity for Ravenclaw)
+
+
+```
+
+```{r}
+nrow(valid_norm_rose)
+```
+
+```{r}
+roc.curve(valid_norm_rose$risk_level, knn_pred_k7_rose)
+```
+
+# Training-Validation split 2.0
+
+```{r}
+# classification tree data set remove state
+class_loan <- new_loan[, -c(8)]
+
+class_loan <- sample_frac(class_loan, 0.1)
+```
+
+
+```{r}
+# First, set the seed.
+set.seed(666)
+```
+
+```{r}
+# Then randomly sample the rows via their indices (i.e. row numbers).
+# We will do a 60-40 split.
+
+train_index_2 <- sample(1:nrow(class_loan), 0.6 * nrow(class_loan))
+valid_index_2 <- setdiff(1:nrow(class_loan), train_index_2)
+```
+
+Assign the randomly selected indices to the dataset to create the training and validation sets.
+
+```{r}
+train_df_2 <- class_loan[train_index_2, ]
+valid_df_2 <- class_loan[valid_index_2, ]
+```
+
+It’s a good idea to check the 2 sets before continuing.
+
+```{r}
+nrow(train_df_2)
+nrow(valid_df_2)
+```
+
+```{r}
+head(train_df_2)
+str(train_df_2)
+```
+
+```{r}
+head(valid_df_2)
+str(valid_df_2)
+```
+
+# Unbalanced Classification Tree
+
+
+```{r}
+class_tr <- rpart(risk_level ~ credit_score + MI + 
+                        CLTV + DTI + LTV + 
+                        interest + channel + prop_type,
+                  data = train_df_2, method = "class", maxdepth = 30)
+
+#summary(class_tr)
+prp(class_tr, cex = 0.8, tweak = 1)
+```
+
+## Predict training set
+
+```{r}
+class_tr_train_predict <- predict(class_tr, train_df_2,
+                                  type = "class")
+
+#summary(class_tr_train_predict)
+
+class_tr_train_predict <- as.factor(class_tr_train_predict)
+train_df_2$risk_level <- as.factor(train_df_2$risk_level)
+
+confusionMatrix(class_tr_train_predict, train_df$risk_level, positive = "1")
+```
+
+## Predict validation set
+
+```{r}
+class_tr_valid_predict <- predict(class_tr, valid_df_2,
+                                    type = "class")
+
+summary(class_tr_valid_predict)
+
+# Convert to factor for the confusion matrix
+class_tr_valid_predict <- as.factor(class_tr_valid_predict)
+valid_df_2$risk_level <- as.factor(valid_df_2$risk_level)
+confusionMatrix(class_tr_valid_predict, valid_df_2$risk_level, positive = "1")
+```
+
+  
+
+
+## Diagnostics
+
+```{r}
+scores_and_ntiles <- prepare_scores_and_ntiles(datasets = list("train_df_2","valid_df_2"),
+                                               dataset_labels = list("Training data","Validation data"),
+                                               models = list("class_tr"),
+                                               model_labels = list("Classification Tree"),
+                                               target_column = "risk_level",
+                                               ntiles = 100)
+
+plot_input <- plotting_scope(prepared_input = scores_and_ntiles)
+head(plot_input)
+```
+
+### Cumulative gains for decision tree
+```{r}
+# Cumulative gains for decision tree
+plot_cumgains(data = plot_input)
+```
+
+### Cumulative lift for decision tree
+
+```{r}
+# Cumulative lift for decision tree
+plot_cumlift(data = plot_input)
+```
+
+### Response plot for decision tree
+
+```{r}
+# Response plot for decision tree
+plot_response(data = plot_input)
+```
+
+### Cumulative response plot for decision tree
+
+```{r}
+# Cumulative response plot for decision tree
+plot_cumresponse(data = plot_input)
+```
+
+### ROC check for AUC
+
+```{r}
+roc.curve(valid_df_2$risk_level, class_tr_valid_predict)
+```
+
+## Balance Training Data
+
+```{r}
+# Using ROSE package we will create weighted training df
+
+train_df_2_rose<- ROSE(risk_level ~ credit_score + MI + 
+                        CLTV + DTI + LTV + 
+                        interest + channel + prop_type,
+                      data = train_df_2, seed = 666)$data
+
+table(train_df_2_rose$risk_level)
+
+```
+
+# Weighted data Classification tree 
+
+```{r}
+class_tr_rose <- rpart(risk_level ~ credit_score + MI + 
+                        CLTV + DTI + LTV + 
+                        interest + channel + prop_type,
+                  data = train_df_2_rose, method = "class", maxdepth = 30)
+
+#summary(class_tr_rose)
+prp(class_tr_rose, cex = 0.8, tweak = 1)
+
+```
+
+## Predict training set
+
+```{r}
+class_tr_rose_train_predict <- predict(class_tr_rose, train_df_2_rose,
+                                    type = "class")
+
+summary(class_tr_rose_train_predict)
+
+# Convert to factor for the confusion matrix
+class_tr_rose_train_predict <- as.factor(class_tr_rose_train_predict)
+train_df_2_rose$risk_level <- as.factor(train_df_2_rose$risk_level)
+confusionMatrix(class_tr_rose_train_predict, train_df_2_rose$risk_level, positive = "1")
+```
+
+## Predict validation set
+
+```{r}
+class_tr_rose_valid_predict <- predict(class_tr_rose, valid_df_2,
+                                    type = "class")
+
+summary(class_tr_rose_valid_predict)
+
+# Convert to factor for the confusion matrix
+class_tr_rose_valid_predict <- as.factor(class_tr_rose_valid_predict)
+valid_df_2$risk_level <- as.factor(valid_df_2$risk_level)
+confusionMatrix(class_tr_rose_valid_predict, valid_df_2$risk_level, positive = "1")
+
+```
+
+# Weight Data Diagnostics
+
+```{r}
+scores_and_ntiles_rose <- prepare_scores_and_ntiles(datasets = list("train_df_2_rose","valid_df_2"),
+                                               dataset_labels = list("Balanced training data","Validation data"),
+                                               models = list("class_tr_rose"),
+                                               model_labels = list("Classification Tree"),
+                                               target_column = "risk_level",
+                                               ntiles = 100)
+
+plot_input_rose <- plotting_scope(prepared_input = scores_and_ntiles_rose)
+head(plot_input_rose)
+```
+
+## Cumulative gains for decision tree
+```{r}
+# Cumulative gains for decision tree
+plot_cumgains(data = plot_input_rose)
+```
+
+
+```{r}
+# Cumulative lift for decision tree
+plot_cumlift(data = plot_input_rose)
+```
+
+```{r}
+# Response plot for decision tree
+plot_response(data = plot_input_rose)
+```
+
+```{r}
+# Cumulative response plot for decision tree
+plot_cumresponse(data = plot_input)
+```
+
+```{r}
+# Plot the ROC curve.
+roc.curve(valid_df_2$risk_level, class_tr_rose_valid_predict)
+```
+
+
+
+
+
+
+
+
+
+
+
+
