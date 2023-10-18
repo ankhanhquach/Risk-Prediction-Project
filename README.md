@@ -1,12 +1,12 @@
 # RStudio_risk_prediction_project
 
-# BUAN 4220 PROJECT
+# BUAN 4310 PROJECT
 
-Welcome to the BUAN 4220 Project! This project is a significant part of your course, designed to challenge your data mining skills and analytical abilities. In this readme, we will provide an in-depth overview of the project, its objectives, deliverables, expectations, and grading criteria.
+Welcome to the BUAN 4310 Project! This project is a significant part of your course, designed to challenge your data mining skills and analytical abilities. In this readme, we will provide an in-depth overview of the project, its objectives, deliverables, expectations, and grading criteria.
 
 ## Project Overview
 
-In the BUAN 4220 Project, you will have the opportunity to work in groups of 2-4 students, simulating a consultancy team. Your mission is to tackle real-world business problems by leveraging data mining techniques to extract valuable insights. The project consists of two distinct problems: Problem 1 and Problem 2. Each group will be responsible for solving both problems. Let's take a closer look at these problems:
+In the BUAN 4310 Project, you will have the opportunity to work in groups of 2-4 students, simulating a consultancy team. Your mission is to tackle real-world business problems by leveraging data mining techniques to extract valuable insights. The project consists of two distinct problems: Problem 1 and Problem 2. Each group will be responsible for solving both problems. Let's take a closer look at these problems:
 
 ### Problem 1
 - **Data Set:** Problem 1 involves a larger dataset with approximately 550,000 records and 27 variables. The data is provided in multiple files named loan_1.csv, loan_2.csv, and so on.
@@ -62,6 +62,6 @@ Approximately 10% of the grade is allocated to truly exceptional work, which inc
 
 ## Conclusion
 
-The BUAN 4220 Project is a challenging but rewarding opportunity to apply your data mining skills to real-world business problems. Your success in this project will depend on your group's ability to work collaboratively, analyze data effectively, and communicate your findings professionally. We encourage you to embrace this learning experience and make the most of it.
+The BUAN 4310 Project is a challenging but rewarding opportunity to apply your data mining skills to real-world business problems. Your success in this project will depend on your group's ability to work collaboratively, analyze data effectively, and communicate your findings professionally. We encourage you to embrace this learning experience and make the most of it.
 
 If you have any questions or need guidance throughout the project, don't hesitate to reach out to your instructor or TA. Good luck, and may the data be with you!
